@@ -1,6 +1,6 @@
 ---
 name: open-tag-admin
-description: Admin/control console for an Open Tag Slack tag-in workflow backed by MFS. Use to set up a new Open Tag bot from scratch, check what is currently running (backend, permitted MFS scopes, Slack channel), change settings, add or remove data sources, switch the CLI agent backend (claude -p / codex exec), invite or move the bot in Slack, run preflight checks, and troubleshoot thread context, retrieval, or task execution.
+description: Admin/control console for an Open Tag Slack and Zulip tag-in workflow backed by MFS. Use to set up a new Open Tag bot from scratch, check what is currently running (backend, permitted MFS scopes, and selected chat transport), change settings, add or remove data sources, switch the CLI agent backend (claude -p / codex exec), run preflight checks, and troubleshoot thread context, retrieval, or task execution.
 ---
 
 # Open Tag (admin)
@@ -22,9 +22,9 @@ Keep the architecture generic:
 The user-facing flow is:
 
 1. Configure MFS sources and allowed scopes.
-2. Configure a Slack app with Socket Mode and invite it to a sandbox channel.
+2. Configure a Slack app with Socket Mode and/or a Zulip Generic bot, then add it to a sandbox channel or stream.
 3. Start the Open Tag bridge.
-4. Move to Slack and tag the bot in a thread.
+4. Mention the bot in a Slack thread or Zulip stream topic.
 5. Let the bridge invoke the selected backend with thread context and scoped MFS
    helper scripts for permitted external context.
 
@@ -63,16 +63,18 @@ Name the Slack app accordingly when you create it (step 3). Set
 ## Setup Workflow
 
 1. Satisfy **Prerequisites** above (MFS running + at least one indexed source).
-2. Read `references/slack-adapter.md` and follow its end-to-end checklist.
-3. Confirm or create a private or otherwise isolated Slack channel.
-4. Create or reuse a Slack app named per the convention above, enable Socket
-   Mode, subscribe to `app_mention`, add the required bot scopes, install it, and
-   invite the bot to the channel.
+2. For a new local installation, run `OpenTag Setup.command`. It writes a
+   private `.env`, checks local prerequisites, and leaves provider credentials
+   to the workspace administrator.
+3. For Slack, read `references/slack-adapter.md`, confirm an isolated channel,
+   then create/install the Socket Mode app and invite it to that channel.
+4. For Zulip, create a Generic bot, subscribe it to the intended stream, and
+   set `ZULIP_CONFIG_FILE` to its downloaded `zuliprc` file.
 5. Configure MFS memory sources and set `MFS_ALLOWED_SCOPES` to the exact source
    roots the runtime agent may use.
 6. Choose `OPENTAG_BACKEND` explicitly: `claude` or `codex`.
-7. Run `python scripts/opentag_doctor.py --channel-id <channel-id>` and fix any
-   failed check.
+7. Run `python scripts/opentag_doctor.py --channel-id <channel-id>` (the channel
+   ID is needed only for Slack) and fix any failed check.
 8. Start the bridge with
    `uv run --with slack-bolt python scripts/slack_socket_agent.py --backend <backend>`.
    It prints a "what's live now" summary — read it, then validate thread context,

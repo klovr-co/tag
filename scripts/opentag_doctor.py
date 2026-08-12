@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import configparser
 import json
 import os
 import shutil
@@ -32,9 +34,13 @@ def print_check(ok: bool, label: str, detail: str = "") -> None:
 
 
 def request_json(
-    url: str, *, token: str | None = None, timeout: int = 20
+    url: str,
+    *,
+    token: str | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: int = 20,
 ) -> tuple[bool, dict[str, Any]]:
-    headers = {}
+    headers = dict(headers or {})
     if token:
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(url, headers=headers)
@@ -59,14 +65,24 @@ def slack_api(
     return ok and bool(data.get("ok")), data
 
 
-def check_env() -> bool:
+def selected_transport() -> str:
+    transport = env("OPENTAG_TRANSPORT") or "slack"
+    if transport in {"slack", "zulip", "both"}:
+        return transport
+    print_check(False, "OPENTAG_TRANSPORT", "must be slack, zulip, or both")
+    return ""
+
+
+def check_env(transport: str) -> bool:
     required = [
-        "SLACK_APP_TOKEN",
-        "SLACK_BOT_TOKEN",
         "MFS_URL",
         "MFS_ALLOWED_SCOPES",
         "OPENTAG_BACKEND",
     ]
+    if transport in {"slack", "both"}:
+        required.extend(["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN"])
+    if transport in {"zulip", "both"}:
+        required.append("ZULIP_CONFIG_FILE")
     all_ok = True
     for name in required:
         value = env(name)
@@ -157,6 +173,51 @@ def check_slack(channel_id: str | None) -> bool:
     return all_ok
 
 
+def read_zuliprc(path_value: str) -> tuple[bool, dict[str, str], str]:
+    path = Path(path_value).expanduser()
+    if not path.is_file():
+        return False, {}, f"file not found: {path}"
+
+    parser = configparser.ConfigParser()
+    try:
+        parser.read(path)
+        config = parser["api"]
+    except (configparser.Error, KeyError) as exc:
+        return False, {}, f"invalid zuliprc: {exc}"
+
+    values = {name: config.get(name, "").strip() for name in ("site", "email", "key")}
+    missing = [name for name, value in values.items() if not value]
+    if missing:
+        return False, {}, f"missing {', '.join(missing)} in [api]"
+    return True, values, "loaded"
+
+
+def check_zulip_config(path_value: str, label: str) -> bool:
+    ok, values, detail = read_zuliprc(path_value)
+    print_check(ok, f"{label} config", detail)
+    if not ok:
+        return False
+
+    credentials = f"{values['email']}:{values['key']}".encode()
+    authorization = base64.b64encode(credentials).decode()
+    url = f"{values['site'].rstrip('/')}/api/v1/users/me"
+    ok, data = request_json(url, headers={"Authorization": f"Basic {authorization}"})
+    identity = data.get("full_name") or data.get("email") or data.get("msg") or data.get("error")
+    print_check(ok and data.get("result") == "success", f"{label} auth", str(identity))
+    return ok and data.get("result") == "success"
+
+
+def check_zulip() -> bool:
+    all_ok = check_zulip_config(env("ZULIP_CONFIG_FILE"), "Zulip bot")
+    if env("ZULIP_AUTO_GRANT_PRIVATE_HISTORY").lower() == "true":
+        admin_path = env("ZULIP_ADMIN_CONFIG_FILE")
+        if not admin_path:
+            print_check(False, "ZULIP_ADMIN_CONFIG_FILE", "required when auto-grant is enabled")
+            return False
+        all_ok = check_zulip_config(admin_path, "Zulip admin") and all_ok
+    return all_ok
+
+
 def check_backend() -> bool:
     backend = env("OPENTAG_BACKEND")
     if backend == "claude":
@@ -184,13 +245,19 @@ def main() -> int:
     parser.add_argument("--channel-id", help="Optional Slack channel ID to verify bot access.")
     args = parser.parse_args()
 
+    transport = selected_transport()
+    if not transport:
+        return 1
     scopes = [scope.strip() for scope in env("MFS_ALLOWED_SCOPES").split(",") if scope.strip()]
     checks = [
-        check_env(),
-        check_slack(args.channel_id),
+        check_env(transport),
         check_mfs(scopes) if scopes else False,
         check_backend(),
     ]
+    if transport in {"slack", "both"}:
+        checks.append(check_slack(args.channel_id))
+    if transport in {"zulip", "both"}:
+        checks.append(check_zulip())
     return 0 if all(checks) else 1
 
 

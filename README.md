@@ -77,7 +77,7 @@ Open Tag ships as the `open-tag-admin` skill. After cloning this repository,
 install it globally for Codex:
 
 ```bash
-npx skills add klvor-co/open-tag --skill open-tag-admin -a codex -g
+npx skills add klovr-co/open-tag --skill open-tag-admin -a codex -g
 ```
 
 Then open a new Codex task and ask it to set up Open Tag using the
@@ -88,20 +88,24 @@ For the local control panel, clone the repository and create your private
 configuration file:
 
 ```bash
-git clone https://github.com/klvor-co/open-tag.git
+git clone https://github.com/klovr-co/open-tag.git
 cd open-tag
-cp .env.example .env
-open "OpenTag Control.command"
+open "OpenTag Setup.command"
 ```
 
-Fill in `.env` with your own Slack and MFS values before selecting **Start Open
-Tag**. `.env` is ignored by Git and must never be committed.
+The guided setup checks local prerequisites and writes a private `.env` with
+owner-only permissions. It pauses for the provider actions that only a workspace
+administrator can authorize: creating/installing the Slack app, creating the
+Zulip Generic bot, and obtaining their credentials. `.env` is ignored by Git and
+must never be committed. Once setup finishes, open `OpenTag Control.command` and
+select **Start Open Tag**.
 
 ## Quick start
 
-Once the skill is installed, you drive everything from Claude Code or Codex in
-plain language — the `open-tag-admin` skill handles credential setup, preflight,
-and launch for you. Open your agent in a working directory and ask.
+Once the skill is installed, you drive the Slack/MFS workflow from Claude Code
+or Codex in plain language — the `open-tag-admin` skill guides setup, preflight,
+and launch. For a local Slack, Zulip, or dual-transport installation, start with
+the guided setup command above. Open your agent in a working directory and ask.
 
 **No credentials yet?** You don't need any tokens in hand first — just say so and
 the skill walks you through getting them. The full manual walkthrough (the Slack
@@ -174,9 +178,18 @@ Then send `@OpenCodex <task>` in a subscribed Zulip stream. The entire current
 topic (up to the latest 30 messages) becomes short-term context; durable context
 is limited to `MFS_ALLOWED_SCOPES`.
 
+The guided setup includes a Zulip preflight: it validates the `zuliprc` structure
+and authenticates the bot with Zulip's `GET /api/v1/users/me` endpoint without
+printing the API key. Run it after loading `.env`:
+
+```bash
+set -a; source .env; set +a
+python3 scripts/opentag_doctor.py
+```
+
 ### Automatically grant access after a mention
 
-For a workspace where it is appropriate for Hover Bot to read every private
+For a workspace where it is appropriate for the Open Tag bot to read every private
 channel that explicitly mentions it, enable the following optional mode using a
 **separate organization administrator** `zuliprc`:
 
@@ -185,7 +198,7 @@ export ZULIP_AUTO_GRANT_PRIVATE_HISTORY="true"
 export ZULIP_ADMIN_CONFIG_FILE="/absolute/path/to/zulip-admin.zuliprc"
 ```
 
-When Hover Bot is mentioned in a private channel, it enables shared history for
+When the Open Tag bot is mentioned in a private channel, it enables shared history for
 that channel, subscribes the bot, and supplies up to 80 recent messages across
 topics in that channel as short-term context. It does not enumerate channels or
 grant itself access without a mention. This changes the channel's history policy

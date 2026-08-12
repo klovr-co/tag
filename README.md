@@ -142,6 +142,55 @@ environment — drive the rest in plain language:
 Then go to Slack and `@OpenClaude` (or `@OpenCodex`) the bot inside a thread — it
 gathers context from the permitted MFS scopes and replies in-thread.
 
+## Use Open Tag in Zulip
+
+Open Tag can also run as a Zulip bot. It keeps the same MFS memory and CLI-agent
+backend; only the chat adapter changes. The bot listens for direct messages and
+mentions in streams, then replies in the same topic. Set `OPENTAG_TRANSPORT` to
+`both` to run the Slack and Zulip adapters together against the same MFS scopes.
+
+1. In Zulip, create a **Generic bot** called **OpenCodex** or **OpenClaude** and
+   download its `zuliprc` file. Keep this credentials file outside the Open Tag
+   checkout and do not commit it.
+2. Subscribe the bot to the stream(s) where it may respond. For a first run, use
+   a private sandbox stream.
+3. In Open Tag's `.env`, set:
+
+   ```bash
+   export OPENTAG_TRANSPORT="zulip"
+   export ZULIP_CONFIG_FILE="/absolute/path/to/opentag-zuliprc"
+   export OPENTAG_BACKEND="codex"
+   export OPENTAG_WORKDIR="/absolute/path/to/your/workspace"
+   export MFS_ALLOWED_SCOPES="file://local/absolute/path/to/your/workspace"
+   ```
+
+4. Start **Open Tag Control** and choose **Start Open Tag**, or run:
+
+   ```bash
+   uv run --with zulip python3 scripts/zulip_agent.py --backend codex
+   ```
+
+Then send `@OpenCodex <task>` in a subscribed Zulip stream. The entire current
+topic (up to the latest 30 messages) becomes short-term context; durable context
+is limited to `MFS_ALLOWED_SCOPES`.
+
+### Automatically grant access after a mention
+
+For a workspace where it is appropriate for Hover Bot to read every private
+channel that explicitly mentions it, enable the following optional mode using a
+**separate organization administrator** `zuliprc`:
+
+```bash
+export ZULIP_AUTO_GRANT_PRIVATE_HISTORY="true"
+export ZULIP_ADMIN_CONFIG_FILE="/absolute/path/to/zulip-admin.zuliprc"
+```
+
+When Hover Bot is mentioned in a private channel, it enables shared history for
+that channel, subscribes the bot, and supplies up to 80 recent messages across
+topics in that channel as short-term context. It does not enumerate channels or
+grant itself access without a mention. This changes the channel's history policy
+for every future subscriber, so use it only where that is the intended policy.
+
 ## Credentials
 
 Open Tag uses Slack credentials in **two** different places — don't confuse them:

@@ -6,14 +6,19 @@ set -u
 SKILL_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="${OPENTAG_ENV_FILE:-$SKILL_DIR/.env}"
 MFS_LOG="$SKILL_DIR/mfs-server.log"
-BRIDGE_LOG="$SKILL_DIR/opentag-bridge.log"
+SLACK_BRIDGE_LOG="$SKILL_DIR/opentag-slack-bridge.log"
+ZULIP_BRIDGE_LOG="$SKILL_DIR/opentag-zulip-bridge.log"
 
 is_mfs_running() {
   pgrep -f "mfs-server run" >/dev/null 2>&1
 }
 
-is_bridge_running() {
+is_slack_running() {
   pgrep -f "$SKILL_DIR/scripts/slack_socket_agent.py --backend" >/dev/null 2>&1
+}
+
+is_zulip_running() {
+  pgrep -f "$SKILL_DIR/scripts/zulip_agent.py --backend" >/dev/null 2>&1
 }
 
 show_status() {
@@ -23,10 +28,15 @@ show_status() {
   else
     echo "✗ MFS memory server: stopped"
   fi
-  if is_bridge_running; then
+  if is_slack_running; then
     echo "✓ Open Tag Slack bridge: running"
   else
     echo "✗ Open Tag Slack bridge: stopped"
+  fi
+  if is_zulip_running; then
+    echo "✓ Open Tag Zulip bridge: running"
+  else
+    echo "✗ Open Tag Zulip bridge: stopped"
   fi
   echo
 }
@@ -36,7 +46,7 @@ require_config() {
     echo "Missing Open Tag configuration:"
     echo "  $ENV_FILE"
     echo
-    echo "Copy .env.example to .env and fill in your Slack/MFS values."
+    echo "Copy .env.example to .env and fill in your chat/MFS values."
     return 1
   fi
 }
@@ -50,12 +60,38 @@ start_opentag() {
     nohup mfs-server run >"$MFS_LOG" 2>&1 &
   fi
 
-  if ! is_bridge_running; then
-    echo "Starting Open Tag Slack bridge…"
-    (
-      exec uv run --with slack-bolt python3 "$SKILL_DIR/scripts/slack_socket_agent.py" \
-        --backend "${OPENTAG_BACKEND:?OPENTAG_BACKEND is required}"
-    ) >"$BRIDGE_LOG" 2>&1 &
+  local transport="${OPENTAG_TRANSPORT:-slack}"
+  if [[ "$transport" != "slack" && "$transport" != "zulip" && "$transport" != "both" ]]; then
+    echo "OPENTAG_TRANSPORT must be slack, zulip, or both."
+    return 1
+  fi
+
+  if [[ "$transport" == "slack" || "$transport" == "both" ]]; then
+    if is_slack_running; then
+      echo "Open Tag Slack bridge is already running."
+    elif [[ -z "${SLACK_APP_TOKEN:-}" || -z "${SLACK_BOT_TOKEN:-}" ]]; then
+      echo "Slack bridge not started: set SLACK_APP_TOKEN and SLACK_BOT_TOKEN in $ENV_FILE."
+    else
+      echo "Starting Open Tag Slack bridge…"
+      (
+        exec uv run --with slack-bolt python3 "$SKILL_DIR/scripts/slack_socket_agent.py" \
+          --backend "${OPENTAG_BACKEND:?OPENTAG_BACKEND is required}"
+      ) >"$SLACK_BRIDGE_LOG" 2>&1 &
+    fi
+  fi
+
+  if [[ "$transport" == "zulip" || "$transport" == "both" ]]; then
+    if is_zulip_running; then
+      echo "Open Tag Zulip bridge is already running."
+    elif [[ -z "${ZULIP_CONFIG_FILE:-}" ]]; then
+      echo "Zulip bridge not started: set ZULIP_CONFIG_FILE in $ENV_FILE."
+    else
+      echo "Starting Open Tag Zulip bridge…"
+      (
+        exec uv run --with zulip python3 "$SKILL_DIR/scripts/zulip_agent.py" \
+          --backend "${OPENTAG_BACKEND:?OPENTAG_BACKEND is required}"
+      ) >"$ZULIP_BRIDGE_LOG" 2>&1 &
+    fi
   fi
 
   sleep 2
@@ -63,8 +99,11 @@ start_opentag() {
 }
 
 stop_opentag() {
-  if is_bridge_running; then
+  if is_slack_running; then
     pkill -f "$SKILL_DIR/scripts/slack_socket_agent.py --backend"
+  fi
+  if is_zulip_running; then
+    pkill -f "$SKILL_DIR/scripts/zulip_agent.py --backend"
   fi
   if is_mfs_running; then
     pkill -f "mfs-server run"

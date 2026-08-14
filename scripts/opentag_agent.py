@@ -26,6 +26,30 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
+def enabled(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def gws_access_status() -> tuple[bool, str]:
+    """Return whether this invocation may use direct Google Workspace access."""
+    if not enabled(os.getenv("OPENTAG_GWS_ENABLED", "")):
+        return False, "disabled (set OPENTAG_GWS_ENABLED=true to opt in)"
+
+    caller = os.getenv("OPENTAG_CALLER_ID", "").strip()
+    allowed_callers = {
+        value.strip()
+        for value in os.getenv("OPENTAG_GWS_ALLOWED_CALLERS", "").split(",")
+        if value.strip()
+    }
+    if not allowed_callers:
+        return False, "disabled (OPENTAG_GWS_ALLOWED_CALLERS is empty)"
+    if not caller:
+        return False, "disabled (the bridge did not identify the caller)"
+    if caller not in allowed_callers:
+        return False, "disabled (this caller is not in OPENTAG_GWS_ALLOWED_CALLERS)"
+    return True, "enabled for this caller"
+
+
 def build_prompt(
     *,
     skill_dir: Path,
@@ -36,6 +60,8 @@ def build_prompt(
     thread_text: str,
     attachments_dir: Path | None,
     allowed_scopes: str,
+    gws_allowed: bool,
+    gws_status: str,
 ) -> str:
     transport = os.getenv("OPENTAG_TRANSPORT", "slack")
     canvas_instructions = ""
@@ -72,6 +98,20 @@ Available helper scripts:
 - {skill_dir / "scripts" / "mfs_cat.py"}
 - {skill_dir / "scripts" / "opentag_memory.py"}
 {canvas_instructions}
+
+Google Workspace Gmail access:
+- Status: {gws_status}.
+- Direct Gmail access is {'permitted' if gws_allowed else 'not permitted'} for this invocation.
+- Only when it is permitted and the user explicitly asks for Gmail content, use the local
+  `gws` CLI for read-only Gmail operations. Before using it, read the installed GWS
+  guidance at `{Path.home() / ".codex" / "skills" / "gws-shared" / "SKILL.md"}` and
+  `{Path.home() / ".codex" / "skills" / "gws-gmail" / "SKILL.md"}` when those files exist.
+- Never use Gmail write or state-changing operations: do not send, reply, forward,
+  create/update/delete drafts, alter labels, or create/stop watches. Do not expose
+  message content beyond what is needed to answer the request, and never expose tokens.
+- Gmail is not an MFS scope. Do not say Gmail is unavailable merely because MFS has no
+  Gmail connector. If `gws auth status` reports an invalid token, explain that the
+  operator must complete `gws auth login -s gmail` interactively.
 
 Slack image attachments (only when the transport is Slack):
 - Attached images, when present, are stored in the attachment directory above.
@@ -252,6 +292,7 @@ def main() -> int:
     workdir = args.workdir.resolve()
     allowed_scopes = os.getenv("MFS_ALLOWED_SCOPES") or f"file://local{workdir}"
     os.environ["MFS_ALLOWED_SCOPES"] = allowed_scopes
+    gws_allowed, gws_status = gws_access_status()
 
     prompt = build_prompt(
         skill_dir=args.skill_dir.resolve(),
@@ -262,6 +303,8 @@ def main() -> int:
         thread_text=read_text(args.thread_file),
         attachments_dir=args.attachments_dir.resolve() if args.attachments_dir else None,
         allowed_scopes=allowed_scopes,
+        gws_allowed=gws_allowed,
+        gws_status=gws_status,
     )
 
     try:

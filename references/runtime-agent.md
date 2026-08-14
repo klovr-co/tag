@@ -13,6 +13,8 @@ the behavior contract for the fresh CLI agent launched by the bridge.
   issues, databases, object stores, or local seed notes.
 - **Tools**: external systems exposed through MFS connectors for read/search, and
   any explicit command or file tools available to the backend in the workspace.
+  Direct Google Workspace Gmail lookup is a narrowly-scoped exception only when
+  the runtime prompt says it is enabled for the current caller.
 
 ## Runtime Inputs
 
@@ -33,13 +35,18 @@ the behavior contract for the fresh CLI agent launched by the bridge.
    `scripts/mfs_search.py "<query>" --top-k 8`.
 4. Reopen relevant hits with `scripts/mfs_cat.py` when line-level or record-level
    evidence is needed.
-5. For explicit task requests, run commands or edit files inside the configured
+5. When the runtime prompt explicitly permits direct Gmail access for the current
+   caller and the user explicitly asks about email, use the local `gws` CLI only
+   for read/search. Never use Gmail write or state-changing operations (send,
+   reply, forward, draft or label changes, deletes, or watches). Gmail is direct
+   tool access, not an MFS memory scope.
+6. For explicit task requests, run commands or edit files inside the configured
    workspace using the CLI backend's normal tools. Keep changes scoped and
    summarize verification.
-6. If the deployment includes indexed Slack history or other permitted sources
+7. If the deployment includes indexed Slack history or other permitted sources
    in `MFS_ALLOWED_SCOPES`, use those as retrievable context. The local memory
    helper is optional seed state, not the main memory model.
-7. Return only the final Slack-ready answer.
+8. Return only the final Slack-ready answer.
 
 ## Answer Contract
 
@@ -71,3 +78,8 @@ sandbox, explicit tool allowlists, and auditable data-source policies.
 - Memory boundary: durable context is whatever the operator has indexed and
   authorized through MFS. Local seed notes are only a small convenience for
   deterministic demos.
+- Google Workspace boundary: direct Gmail lookup is off unless
+  `OPENTAG_GWS_ENABLED=true` and the bridge identifies the requester in
+  `OPENTAG_GWS_ALLOWED_CALLERS`. This is an agent policy, not an operating-system
+  sandbox; run the bot only in a trusted channel and use a dedicated account or
+  a real sandbox for stronger isolation.

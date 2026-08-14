@@ -125,7 +125,14 @@ def enable_private_stream_history(admin_client: Any, message: dict[str, Any], bo
         raise RuntimeError(result.get("msg", "Could not subscribe Hover Bot to the mentioned stream"))
 
 
-def run_backend(backend: str, conversation_id: str, question: str, thread_text: str, timeout: int) -> str:
+def run_backend(
+    backend: str,
+    conversation_id: str,
+    caller_id: str,
+    question: str,
+    thread_text: str,
+    timeout: int,
+) -> str:
     with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as output:
         output.write(thread_text)
         thread_file = Path(output.name)
@@ -151,6 +158,7 @@ def run_backend(backend: str, conversation_id: str, question: str, thread_text: 
     try:
         child_env = os.environ.copy()
         child_env["OPENTAG_CURRENT_CHANNEL_ID"] = conversation_id
+        child_env["OPENTAG_CALLER_ID"] = caller_id
         result = subprocess.run(
             cmd,
             check=False,
@@ -274,7 +282,14 @@ def main() -> None:
                 enable_private_stream_history(admin_client, message, bot_user_id)
             question = strip_mention(message.get("content", ""), bot_name)
             context = get_stream_context(client, message) if admin_client is not None else get_topic_context(client, message)
-            answer = run_backend(args.backend, conversation_id(message), question, context, args.timeout)
+            answer = run_backend(
+                args.backend,
+                conversation_id(message),
+                message.get("sender_email", ""),
+                question,
+                context,
+                args.timeout,
+            )
             try:
                 update_reply(client, status_message_id, answer)
             except Exception:  # noqa: BLE001

@@ -146,6 +146,24 @@ environment — drive the rest in plain language:
 Then go to Slack and `@OpenClaude` (or `@OpenCodex`) the bot inside a thread — it
 gathers context from the permitted MFS scopes and replies in-thread.
 
+### Optional Gmail lookup with Google Workspace CLI
+
+For a local Open Tag installation, you may grant direct, read-only Gmail lookup
+to specified callers. This does not make Gmail an MFS source or expand
+`MFS_ALLOWED_SCOPES`; it uses the locally authenticated `gws` CLI only for an
+explicit email request.
+
+```bash
+gws auth login -s gmail
+export OPENTAG_GWS_ENABLED="true"
+export OPENTAG_GWS_ALLOWED_CALLERS="U0123456789"  # Slack member ID(s), comma-separated
+```
+
+With Zulip, include approved sender email addresses in the same allowlist. The
+runtime forbids Gmail send/reply/forward, draft and label changes, deletion, and
+watches. Run the bot in a trusted private channel: this is a runtime policy
+guard, not an operating-system sandbox.
+
 ## Use Open Tag in Zulip
 
 Open Tag can also run as a Zulip bot. It keeps the same MFS memory and CLI-agent

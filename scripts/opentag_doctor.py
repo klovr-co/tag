@@ -7,6 +7,7 @@ import configparser
 import json
 import os
 import shutil
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -240,6 +241,43 @@ def check_backend() -> bool:
     return False
 
 
+def check_gws() -> bool:
+    if env("OPENTAG_GWS_ENABLED").lower() not in {"1", "true", "yes", "on"}:
+        return True
+
+    allowed_callers = [value.strip() for value in env("OPENTAG_GWS_ALLOWED_CALLERS").split(",") if value.strip()]
+    callers_ok = bool(allowed_callers)
+    print_check(
+        callers_ok,
+        "OPENTAG_GWS_ALLOWED_CALLERS",
+        f"{len(allowed_callers)} permitted caller(s)" if callers_ok else "required when GWS is enabled",
+    )
+
+    gws_path = shutil.which("gws")
+    print_check(bool(gws_path), "GWS CLI", "found" if gws_path else "missing")
+    if not gws_path:
+        return False
+
+    result = subprocess.run(
+        [gws_path, "auth", "status"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=15,
+    )
+    try:
+        status = json.loads(result.stdout[result.stdout.find("{") :])
+    except (json.JSONDecodeError, ValueError):
+        status = {}
+    token_ok = bool(status.get("token_valid"))
+    detail = "authenticated" if token_ok else status.get("token_error", "token invalid or unavailable")
+    print_check(token_ok, "GWS Gmail authentication", str(detail))
+    if not token_ok:
+        print("       hint: run `gws auth login -s gmail` and complete the browser consent flow.")
+    return callers_ok and token_ok
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Preflight an Open Tag Slack + MFS setup.")
     parser.add_argument("--channel-id", help="Optional Slack channel ID to verify bot access.")
@@ -253,6 +291,7 @@ def main() -> int:
         check_env(transport),
         check_mfs(scopes) if scopes else False,
         check_backend(),
+        check_gws(),
     ]
     if transport in {"slack", "both"}:
         checks.append(check_slack(args.channel_id))

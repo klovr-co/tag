@@ -158,6 +158,26 @@ export OPENTAG_TIMEOUT_SECONDS=420
 export OPENTAG_BACKEND_ATTEMPTS=3   # codex backend: retries on capacity/rate-limit
 ```
 
+### Optional direct Gmail lookup via Google Workspace CLI
+
+Open Tag can use the locally authenticated [`gws`](https://github.com/googleworkspace/cli)
+CLI for direct, read-only Gmail lookup. This is distinct from MFS: it does not
+index mail or add a `gmail://` scope. It is disabled unless both settings below
+are present:
+
+```bash
+export OPENTAG_GWS_ENABLED="true"
+# Slack member IDs, comma-separated. With Zulip enabled, sender email addresses
+# can be included too.
+export OPENTAG_GWS_ALLOWED_CALLERS="U0123456789"
+gws auth login -s gmail
+```
+
+Only an allowlisted caller may trigger Gmail reads. Sending, replying, changing
+labels, creating drafts, deleting messages, and creating watches are forbidden
+by the Open Tag runtime. This is a policy guard rather than an OS sandbox, so
+use a private trusted channel and a dedicated Google account when possible.
+
 ## Preflight
 
 Run this before starting the bridge:

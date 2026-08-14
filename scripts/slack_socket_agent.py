@@ -139,6 +139,7 @@ def build_thread_text(client: Any, channel: str, thread_ts: str, attachment_dir:
 def run_backend(
     backend: str,
     channel: str,
+    caller_id: str,
     question: str,
     thread_text: str,
     attachment_dir: Path,
@@ -171,6 +172,7 @@ def run_backend(
     try:
         child_env = os.environ.copy()
         child_env["OPENTAG_CURRENT_CHANNEL_ID"] = channel
+        child_env["OPENTAG_CALLER_ID"] = caller_id
         result = subprocess.run(
             cmd,
             check=False,
@@ -244,7 +246,13 @@ def create_app(backend: str, timeout: int) -> App:
                 attachment_dir = Path(raw_attachment_dir)
                 thread_text = build_thread_text(client, channel, thread_ts, attachment_dir)
                 answer = run_backend(
-                    backend, channel, question, thread_text, attachment_dir, timeout
+                    backend,
+                    channel,
+                    event.get("user", ""),
+                    question,
+                    thread_text,
+                    attachment_dir,
+                    timeout,
                 )
             client.chat_update(
                 channel=channel,

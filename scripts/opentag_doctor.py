@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -74,7 +75,16 @@ def selected_transport() -> str:
     return ""
 
 
-def check_env(transport: str) -> bool:
+def selected_zulip_engine(transport: str) -> str:
+    if transport not in {"zulip", "both"}:
+        return "native"
+    engine = env("OPENTAG_ZULIP_ENGINE") or "native"
+    ok = engine in {"native", "zulipmcp"}
+    print_check(ok, "OPENTAG_ZULIP_ENGINE", engine if ok else "must be native or zulipmcp")
+    return engine if ok else ""
+
+
+def check_env(transport: str, zulip_engine: str) -> bool:
     required = [
         "MFS_URL",
         "MFS_ALLOWED_SCOPES",
@@ -84,6 +94,8 @@ def check_env(transport: str) -> bool:
         required.extend(["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN"])
     if transport in {"zulip", "both"}:
         required.append("ZULIP_CONFIG_FILE")
+        if zulip_engine == "zulipmcp":
+            required.append("OPENTAG_WORKDIR")
     all_ok = True
     for name in required:
         value = env(name)
@@ -208,9 +220,72 @@ def check_zulip_config(path_value: str, label: str) -> bool:
     return ok and data.get("result") == "success"
 
 
-def check_zulip() -> bool:
+def check_zulipmcp_runtime() -> bool:
+    runtime = Path(__file__).with_name("zulip_runtime.py")
+    result = subprocess.run(
+        [sys.executable, str(runtime), "--print-command"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=30,
+    )
+    command_ok = result.returncode == 0
+    detail = "launch policy validated" if command_ok else result.stdout.strip()[-500:]
+    print_check(command_ok, "ZulipMCP OpenTag runtime", detail)
+    if not command_ok:
+        return False
+
+    from zulip_runtime import ZULIPMCP_PACKAGE
+
+    uv_path = shutil.which("uv")
+    if not uv_path:
+        print_check(False, "ZulipMCP dependency", "uv executable missing")
+        return False
+    result = subprocess.run(
+        [
+            uv_path,
+            "run",
+            "--with",
+            ZULIPMCP_PACKAGE,
+            "python3",
+            "-c",
+            "import zulipmcp; print('imported')",
+        ],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=180,
+    )
+    dependency_ok = result.returncode == 0 and "imported" in result.stdout
+    print_check(
+        dependency_ok,
+        "ZulipMCP pinned dependency",
+        "imported" if dependency_ok else result.stdout.strip()[-500:],
+    )
+
+    private_streams = env("BOT_ALLOWED_PRIVATE_STREAMS")
+    print_check(
+        True,
+        "ZulipMCP private-stream policy",
+        "explicit allowlist set" if private_streams else "public streams only",
+    )
+    return dependency_ok
+
+
+def check_zulip(zulip_engine: str) -> bool:
     all_ok = check_zulip_config(env("ZULIP_CONFIG_FILE"), "Zulip bot")
-    if env("ZULIP_AUTO_GRANT_PRIVATE_HISTORY").lower() == "true":
+    auto_grant = env("ZULIP_AUTO_GRANT_PRIVATE_HISTORY").lower() == "true"
+    if zulip_engine == "zulipmcp":
+        auto_grant_ok = not auto_grant
+        print_check(
+            auto_grant_ok,
+            "ZULIP_AUTO_GRANT_PRIVATE_HISTORY",
+            "disabled" if auto_grant_ok else "must be false with zulipmcp",
+        )
+        return check_zulipmcp_runtime() and auto_grant_ok and all_ok
+    if auto_grant:
         admin_path = env("ZULIP_ADMIN_CONFIG_FILE")
         if not admin_path:
             print_check(False, "ZULIP_ADMIN_CONFIG_FILE", "required when auto-grant is enabled")
@@ -241,43 +316,6 @@ def check_backend() -> bool:
     return False
 
 
-def check_gws() -> bool:
-    if env("OPENTAG_GWS_ENABLED").lower() not in {"1", "true", "yes", "on"}:
-        return True
-
-    allowed_callers = [value.strip() for value in env("OPENTAG_GWS_ALLOWED_CALLERS").split(",") if value.strip()]
-    callers_ok = bool(allowed_callers)
-    print_check(
-        callers_ok,
-        "OPENTAG_GWS_ALLOWED_CALLERS",
-        f"{len(allowed_callers)} permitted caller(s)" if callers_ok else "required when GWS is enabled",
-    )
-
-    gws_path = shutil.which("gws")
-    print_check(bool(gws_path), "GWS CLI", "found" if gws_path else "missing")
-    if not gws_path:
-        return False
-
-    result = subprocess.run(
-        [gws_path, "auth", "status"],
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=15,
-    )
-    try:
-        status = json.loads(result.stdout[result.stdout.find("{") :])
-    except (json.JSONDecodeError, ValueError):
-        status = {}
-    token_ok = bool(status.get("token_valid"))
-    detail = "authenticated" if token_ok else status.get("token_error", "token invalid or unavailable")
-    print_check(token_ok, "GWS Gmail authentication", str(detail))
-    if not token_ok:
-        print("       hint: run `gws auth login -s gmail` and complete the browser consent flow.")
-    return callers_ok and token_ok
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Preflight an Open Tag Slack + MFS setup.")
     parser.add_argument("--channel-id", help="Optional Slack channel ID to verify bot access.")
@@ -286,17 +324,19 @@ def main() -> int:
     transport = selected_transport()
     if not transport:
         return 1
+    zulip_engine = selected_zulip_engine(transport)
+    if transport in {"zulip", "both"} and not zulip_engine:
+        return 1
     scopes = [scope.strip() for scope in env("MFS_ALLOWED_SCOPES").split(",") if scope.strip()]
     checks = [
-        check_env(transport),
+        check_env(transport, zulip_engine),
         check_mfs(scopes) if scopes else False,
         check_backend(),
-        check_gws(),
     ]
     if transport in {"slack", "both"}:
         checks.append(check_slack(args.channel_id))
     if transport in {"zulip", "both"}:
-        checks.append(check_zulip())
+        checks.append(check_zulip(zulip_engine))
     return 0 if all(checks) else 1
 
 

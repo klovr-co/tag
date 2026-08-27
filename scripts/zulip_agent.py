@@ -13,6 +13,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from opentag_process_env import backend_environment
+
 
 MAX_THREAD_MESSAGES = 30
 MAX_STREAM_CONTEXT_MESSAGES = 80
@@ -156,9 +158,12 @@ def run_backend(
         str(timeout),
     ]
     try:
-        child_env = os.environ.copy()
-        child_env["OPENTAG_CURRENT_CHANNEL_ID"] = conversation_id
-        child_env["OPENTAG_CALLER_ID"] = caller_id
+        child_env = backend_environment(
+            os.environ,
+            transport="zulip",
+            conversation_id=conversation_id,
+            caller_id=caller_id,
+        )
         result = subprocess.run(
             cmd,
             check=False,

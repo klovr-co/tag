@@ -17,8 +17,16 @@ is_slack_running() {
   pgrep -f "$SKILL_DIR/scripts/slack_socket_agent.py --backend" >/dev/null 2>&1
 }
 
-is_zulip_running() {
+is_native_zulip_running() {
   pgrep -f "$SKILL_DIR/scripts/zulip_agent.py --backend" >/dev/null 2>&1
+}
+
+is_zulipmcp_running() {
+  pgrep -f "$SKILL_DIR/scripts/zulipmcp_entrypoint.py --zuliprc" >/dev/null 2>&1
+}
+
+is_zulip_running() {
+  is_native_zulip_running || is_zulipmcp_running
 }
 
 show_status() {
@@ -33,8 +41,10 @@ show_status() {
   else
     echo "✗ Open Tag Slack bridge: stopped"
   fi
-  if is_zulip_running; then
-    echo "✓ Open Tag Zulip bridge: running"
+  if is_zulipmcp_running; then
+    echo "✓ Open Tag Zulip bridge: running (zulipmcp)"
+  elif is_native_zulip_running; then
+    echo "✓ Open Tag Zulip bridge: running (native)"
   else
     echo "✗ Open Tag Zulip bridge: stopped"
   fi
@@ -88,7 +98,7 @@ start_opentag() {
     else
       echo "Starting Open Tag Zulip bridge…"
       (
-        exec uv run --with zulip python3 "$SKILL_DIR/scripts/zulip_agent.py" \
+        exec python3 "$SKILL_DIR/scripts/zulip_runtime.py" \
           --backend "${OPENTAG_BACKEND:?OPENTAG_BACKEND is required}"
       ) >"$ZULIP_BRIDGE_LOG" 2>&1 &
     fi
@@ -102,8 +112,11 @@ stop_opentag() {
   if is_slack_running; then
     pkill -f "$SKILL_DIR/scripts/slack_socket_agent.py --backend"
   fi
-  if is_zulip_running; then
+  if is_native_zulip_running; then
     pkill -f "$SKILL_DIR/scripts/zulip_agent.py --backend"
+  fi
+  if is_zulipmcp_running; then
+    pkill -f "$SKILL_DIR/scripts/zulipmcp_entrypoint.py --zuliprc"
   fi
   if is_mfs_running; then
     pkill -f "mfs-server run"

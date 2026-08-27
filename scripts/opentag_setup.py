@@ -133,7 +133,19 @@ def main() -> int:
     if transport in {"zulip", "both"}:
         print("\nCreate a Generic Zulip bot, subscribe it to the intended stream, then download its zuliprc file.")
         values["ZULIP_CONFIG_FILE"] = zulip_config_path()
+        zulip_engine = choose("Zulip engine", ("native", "zulipmcp"), "native")
+        values["OPENTAG_ZULIP_ENGINE"] = zulip_engine
         values["ZULIP_AUTO_GRANT_PRIVATE_HISTORY"] = "false"
+        if zulip_engine == "zulipmcp":
+            values["OPENTAG_ZULIPMCP_CODEX_PERMISSION_MODE"] = "workspace-write"
+            values["OPENTAG_ZULIPMCP_MAX_SESSIONS"] = "1"
+            values["OPENTAG_ZULIPMCP_IDLE_HOURS"] = "0.5"
+            values["BOT_ALLOWED_PRIVATE_STREAMS"] = ask(
+                "Private Zulip streams the MCP agent may access (comma-separated; blank denies all)"
+            )
+            values["BOT_ALLOWED_WRITE_STREAMS"] = ask(
+                "Zulip streams the MCP agent may write (comma-separated; blank uses upstream allow-all default)"
+            )
 
     write_config(config_path, values)
     print("\nChecking local prerequisites:")

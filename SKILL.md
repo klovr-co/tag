@@ -69,15 +69,16 @@ Name the Slack app accordingly when you create it (step 3). Set
 3. For Slack, read `references/slack-adapter.md`, confirm an isolated channel,
    then create/install the Socket Mode app and invite it to that channel.
 4. For Zulip, create a Generic bot, subscribe it to the intended stream, and
-   set `ZULIP_CONFIG_FILE` to its downloaded `zuliprc` file.
+   set `ZULIP_CONFIG_FILE` to its downloaded `zuliprc` file. Choose
+   `OPENTAG_ZULIP_ENGINE=native` for one-shot DM/mention runs or `zulipmcp` for
+   persistent stream/topic sessions. Never run both Zulip engines for one bot.
 5. Configure MFS memory sources and set `MFS_ALLOWED_SCOPES` to the exact source
    roots the runtime agent may use.
 6. Choose `OPENTAG_BACKEND` explicitly: `claude` or `codex`.
 7. Run `python scripts/opentag_doctor.py --channel-id <channel-id>` (the channel
    ID is needed only for Slack) and fix any failed check.
-8. Start the bridge with
-   `uv run --with slack-bolt python scripts/slack_socket_agent.py --backend <backend>`.
-   It prints a "what's live now" summary — read it, then validate thread context,
+8. Start the configured transports with `OpenTag Control.command`. It prints a
+   "what's live now" summary — read it, then validate thread context,
    permitted-context retrieval, and task execution with a realistic delegated task.
 
 ## Adding data sources
@@ -107,6 +108,12 @@ Keep the Python scripts as deterministic glue:
 
 - `slack_socket_agent.py`: receive Slack `app_mention`, read the thread, post
   progress, call the backend, and post the final answer.
+- `zulip_runtime.py`: expose the Zulip engine seam and launch either the native
+  adapter or the pinned ZulipMCP adapter with runtime-generated policy files.
+- `zulipmcp_entrypoint.py`: apply the canary session cap before starting the
+  upstream listener.
+- `opentag_process_env.py`: prevent one transport's credentials from entering
+  the other transport's backend processes.
 - `opentag_agent.py`: build a non-interactive prompt and invoke the selected CLI
   backend.
 - `mfs_search.py` and `mfs_cat.py`: call the MFS HTTP API with scoped search and

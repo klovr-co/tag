@@ -158,25 +158,23 @@ export OPENTAG_TIMEOUT_SECONDS=420
 export OPENTAG_BACKEND_ATTEMPTS=3   # codex backend: retries on capacity/rate-limit
 ```
 
-### Optional direct Gmail lookup via Google Workspace CLI
+### Optional local tools, including Google Workspace CLI
 
-Open Tag can use the locally authenticated [`gws`](https://github.com/googleworkspace/cli)
-CLI for direct, read-only Gmail lookup. This is distinct from MFS: it does not
-index mail or add a `gmail://` scope. It is disabled unless both settings below
-are present:
+Open Tag passes work to the selected backend with its normal local commands and
+skills. An installed, authenticated [`gws`](https://github.com/googleworkspace/cli)
+CLI is available to that backend like any other local tool. Open Tag does not
+maintain a separate Gmail feature flag or caller allowlist; the tool's own OAuth
+grants determine its capabilities.
+
+Open Tag keeps its project-specific skills in `.codex/skills`. This repository
+includes only `gws-shared` and `gws-gmail` there; Codex also retains its normal
+global `~/.codex/skills` discovery.
 
 ```bash
-export OPENTAG_GWS_ENABLED="true"
-# Slack member IDs, comma-separated. With Zulip enabled, sender email addresses
-# can be included too.
-export OPENTAG_GWS_ALLOWED_CALLERS="U0123456789"
 gws auth login -s gmail
 ```
 
-Only an allowlisted caller may trigger Gmail reads. Sending, replying, changing
-labels, creating drafts, deleting messages, and creating watches are forbidden
-by the Open Tag runtime. This is a policy guard rather than an OS sandbox, so
-use a private trusted channel and a dedicated Google account when possible.
+This is distinct from MFS: it does not index mail or add a `gmail://` scope.
 
 ## Preflight
 

@@ -15,6 +15,8 @@ from typing import Any
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
+from opentag_process_env import backend_environment
+
 
 MENTION_RE = re.compile(r"<@[^>]+>")
 MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
@@ -170,9 +172,12 @@ def run_backend(
         str(timeout),
     ]
     try:
-        child_env = os.environ.copy()
-        child_env["OPENTAG_CURRENT_CHANNEL_ID"] = channel
-        child_env["OPENTAG_CALLER_ID"] = caller_id
+        child_env = backend_environment(
+            os.environ,
+            transport="slack",
+            conversation_id=channel,
+            caller_id=caller_id,
+        )
         result = subprocess.run(
             cmd,
             check=False,

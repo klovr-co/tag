@@ -49,6 +49,16 @@ Canvas capability:
 - Never call Slack's HTTP API directly and never expose or print Slack tokens.
 - Do not create, edit, delete, or share a Canvas unless the user explicitly
   asks for that action. Report the resulting Canvas URL when Slack provides one.
+
+Channel-post capability:
+- When the user explicitly asks to post, send, or share a message in this Slack
+  channel, run `python3 {skill_dir / "scripts" / "slack_post_message.py"}`
+  with `--text`. This creates a new top-level channel message, not a thread reply.
+- It is already restricted to the channel that triggered this @mention. Never
+  call Slack's HTTP API directly or use it to post to another channel.
+- Do not post merely because you produced a summary; post only when the user
+  expressly requested the channel message. State in your final answer whether
+  the post succeeded.
 """
     return f"""
 You are being invoked by an Open Tag {transport} bridge.
@@ -71,6 +81,7 @@ Available helper scripts:
 - {skill_dir / "scripts" / "mfs_search.py"}
 - {skill_dir / "scripts" / "mfs_cat.py"}
 - {skill_dir / "scripts" / "opentag_memory.py"}
+- {skill_dir / "scripts" / "slack_post_message.py"}
 {canvas_instructions}
 
 Local tools:

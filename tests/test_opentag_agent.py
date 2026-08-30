@@ -33,3 +33,27 @@ class OpenTagAgentPromptTests(unittest.TestCase):
         self.assertNotIn("OPENTAG_GWS_ENABLED", prompt)
         self.assertNotIn("OPENTAG_GWS_ALLOWED_CALLERS", prompt)
         self.assertNotIn("read-only Gmail operations", prompt)
+
+    def test_slack_prompt_includes_current_channel_posting_capability(self) -> None:
+        previous_transport = os.environ.get("OPENTAG_TRANSPORT")
+        os.environ["OPENTAG_TRANSPORT"] = "slack"
+        try:
+            prompt = opentag_agent.build_prompt(
+                skill_dir=Path("/tmp/open-tag"),
+                workdir=Path("/tmp/workspace"),
+                memory_root=Path("/tmp/memory"),
+                channel_id="C123",
+                question="Summarise and send it to the channel",
+                thread_text="",
+                attachments_dir=None,
+                allowed_scopes="file://local/tmp/workspace",
+            )
+        finally:
+            if previous_transport is None:
+                del os.environ["OPENTAG_TRANSPORT"]
+            else:
+                os.environ["OPENTAG_TRANSPORT"] = previous_transport
+
+        self.assertIn("slack_post_message.py", prompt)
+        self.assertIn("new top-level channel message", prompt)
+        self.assertIn("only when the user", prompt)

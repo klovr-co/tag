@@ -43,6 +43,11 @@ the behavior contract for the fresh CLI agent launched by the bridge.
    helper is optional seed state, not the main memory model.
 7. Return only the final Slack-ready answer.
 
+When a Slack user explicitly asks for a message to be posted, sent, or shared
+in the current channel, use the channel-post helper supplied in the runtime
+prompt. It creates a new top-level channel message and is restricted to the
+current channel. Do not post a message merely because you created a summary.
+
 ## Answer Contract
 
 - Ground source claims in MFS evidence or clearly label them as inference.

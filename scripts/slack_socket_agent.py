@@ -15,12 +15,42 @@ from typing import Any
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
-from opentag_process_env import backend_environment
+try:
+    from .opentag_process_env import backend_environment
+except ImportError:  # Direct script execution does not create a package context.
+    from opentag_process_env import backend_environment
 
 
 MENTION_RE = re.compile(r"<@[^>]+>")
 MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
 MAX_ATTACHMENT_TEXT_CHARS = 12_000
+TEXT_FILE_MIME_TYPES = {
+    "application/json",
+    "application/javascript",
+    "application/xml",
+    "application/x-yaml",
+}
+TEXT_FILE_TYPES = {
+    "bash",
+    "c",
+    "cpp",
+    "csv",
+    "html",
+    "java",
+    "javascript",
+    "json",
+    "markdown",
+    "md",
+    "php",
+    "python",
+    "ruby",
+    "sql",
+    "text",
+    "txt",
+    "typescript",
+    "xml",
+    "yaml",
+}
 
 
 def attachment_text(value: Any) -> str:
@@ -83,6 +113,31 @@ def attachment_name(file: dict[str, Any], index: int) -> str:
     return safe_name or f"slack-image-{index}"
 
 
+def is_text_file(file: dict[str, Any]) -> bool:
+    """Return whether a Slack file is safe to include as bounded prompt text."""
+    mime_type = (file.get("mimetype") or "").lower()
+    file_type = (file.get("filetype") or "").lower()
+    return mime_type.startswith("text/") or mime_type in TEXT_FILE_MIME_TYPES or file_type in TEXT_FILE_TYPES
+
+
+def download_file_bytes(url: str, token: str, expected_content_prefix: str | None = None) -> bytes:
+    """Download one private Slack file while enforcing the attachment size limit."""
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    chunks: list[bytes] = []
+    total = 0
+    with urllib.request.urlopen(request, timeout=30) as response:
+        if expected_content_prefix:
+            content_type = response.headers.get_content_type()
+            if content_type and not content_type.startswith(expected_content_prefix):
+                raise ValueError(f"Slack returned {content_type}, not {expected_content_prefix.rstrip('/')}")
+        while chunk := response.read(1024 * 1024):
+            total += len(chunk)
+            if total > MAX_ATTACHMENT_BYTES:
+                raise ValueError("file exceeds the 15 MB safety limit")
+            chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def download_thread_images(messages: list[dict[str, Any]], attachment_dir: Path) -> list[str]:
     """Download Slack image attachments for the current invocation only."""
     lines: list[str] = []
@@ -106,22 +161,44 @@ def download_thread_images(messages: list[dict[str, Any]], attachment_dir: Path)
 
             target = attachment_dir / name
             try:
-                request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
-                with urllib.request.urlopen(request, timeout=30) as response, target.open("wb") as output:
-                    content_type = response.headers.get_content_type()
-                    if content_type and not content_type.startswith("image/"):
-                        raise ValueError(f"Slack returned {content_type}, not an image")
-                    total = 0
-                    while chunk := response.read(1024 * 1024):
-                        total += len(chunk)
-                        if total > MAX_ATTACHMENT_BYTES:
-                            raise ValueError("image exceeds the 15 MB safety limit")
-                        output.write(chunk)
+                data = download_file_bytes(url, token, expected_content_prefix="image/")
+                with target.open("wb") as output:
+                    output.write(data)
                 detected_type = mimetypes.guess_type(target.name)[0] or mime_type
                 lines.append(f"[Slack image attachment: {name} ({detected_type}) at {target}]")
             except (OSError, urllib.error.URLError, ValueError) as exc:
                 target.unlink(missing_ok=True)
                 lines.append(f"[Could not retrieve Slack image {name}: {exc}]")
+    return lines
+
+
+def download_thread_text_files(messages: list[dict[str, Any]]) -> list[str]:
+    """Read Slack snippets and text attachments into the current prompt only."""
+    lines: list[str] = []
+    seen_file_ids: set[str] = set()
+    token = require_env("SLACK_BOT_TOKEN")
+
+    for message in messages:
+        for file in message.get("files") or []:
+            file_id = file.get("id")
+            if not file_id or file_id in seen_file_ids or not is_text_file(file):
+                continue
+            seen_file_ids.add(file_id)
+            name = attachment_name(file, len(seen_file_ids))
+            url = file.get("url_private_download") or file.get("url_private")
+            if not url:
+                lines.append(f"[Slack text attachment could not be downloaded: {name}]")
+                continue
+            try:
+                text = download_file_bytes(url, token).decode("utf-8", errors="replace").strip()
+                if len(text) > MAX_ATTACHMENT_TEXT_CHARS:
+                    text = text[:MAX_ATTACHMENT_TEXT_CHARS] + "\n[Attachment text truncated]"
+                if text:
+                    lines.append(f"[Slack text attachment: {name}]\n{text}")
+                else:
+                    lines.append(f"[Slack text attachment was empty: {name}]")
+            except (OSError, UnicodeError, urllib.error.URLError, ValueError) as exc:
+                lines.append(f"[Could not retrieve Slack text attachment {name}: {exc}]")
     return lines
 
 
@@ -134,6 +211,7 @@ def build_thread_text(client: Any, channel: str, thread_ts: str, attachment_dir:
         text = message.get("text", "")
         lines.append(f"{user}: {text}")
         lines.extend(format_message_attachments(message))
+    lines.extend(download_thread_text_files(messages))
     lines.extend(download_thread_images(messages, attachment_dir))
     return "\n".join(lines)
 

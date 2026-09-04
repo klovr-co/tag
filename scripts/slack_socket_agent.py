@@ -17,8 +17,10 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 try:
     from .opentag_process_env import backend_environment
+    from .slack_mrkdwn import to_mrkdwn
 except ImportError:  # Direct script execution does not create a package context.
     from opentag_process_env import backend_environment
+    from slack_mrkdwn import to_mrkdwn
 
 
 MENTION_RE = re.compile(r"<@[^>]+>")
@@ -359,14 +361,15 @@ def create_app(backend: str, timeout: int) -> App:
                     attachment_dir,
                     timeout,
                 )
-            chunks = split_reply(answer)
+            chunks = split_reply(to_mrkdwn(answer))
             client.chat_update(
                 channel=channel,
                 ts=status["ts"],
                 text=chunks[0],
+                mrkdwn=True,
             )
             for chunk in chunks[1:]:
-                client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=chunk)
+                client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=chunk, mrkdwn=True)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Open Tag failed")
             answer = f"Open Tag failed: `{type(exc).__name__}: {exc}`"

@@ -32,5 +32,5 @@ class SlackPostMessageTests(unittest.TestCase):
         self.assertEqual("C123", result["channel"])
         request = mock_urlopen.call_args.args[0]  # type: ignore[union-attr]
         payload = json.loads(request.data.decode("utf-8"))
-        self.assertEqual({"channel": "C123", "text": "Hello team"}, payload)
+        self.assertEqual({"channel": "C123", "text": "Hello team", "mrkdwn": True}, payload)
         self.assertNotIn("thread_ts", payload)

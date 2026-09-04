@@ -8,6 +8,11 @@ import os
 import urllib.error
 import urllib.request
 
+try:
+    from .slack_mrkdwn import to_mrkdwn
+except ImportError:  # Direct script execution does not create a package context.
+    from slack_mrkdwn import to_mrkdwn
+
 
 API_URL = "https://slack.com/api/chat.postMessage"
 MAX_MESSAGE_CHARS = 4_000
@@ -24,7 +29,8 @@ def post_to_current_channel(*, text: str) -> dict:
     """Post a new channel message; the caller cannot choose another channel."""
     payload = {
         "channel": require_env("OPENTAG_CURRENT_CHANNEL_ID"),
-        "text": text,
+        "text": to_mrkdwn(text),
+        "mrkdwn": True,
     }
     request = urllib.request.Request(
         API_URL,

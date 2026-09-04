@@ -24,6 +24,7 @@ except ImportError:  # Direct script execution does not create a package context
 MENTION_RE = re.compile(r"<@[^>]+>")
 MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
 MAX_ATTACHMENT_TEXT_CHARS = 12_000
+MAX_REPLY_CHARS = 3_800
 TEXT_FILE_MIME_TYPES = {
     "application/json",
     "application/javascript",
@@ -216,6 +217,29 @@ def build_thread_text(client: Any, channel: str, thread_ts: str, attachment_dir:
     return "\n".join(lines)
 
 
+def split_reply(text: str, max_chars: int = MAX_REPLY_CHARS) -> list[str]:
+    """Split a Slack reply at readable boundaries without losing generated text."""
+    if max_chars < 1:
+        raise ValueError("max_chars must be positive")
+    if len(text) <= max_chars:
+        return [text]
+
+    chunks: list[str] = []
+    remaining = text
+    while len(remaining) > max_chars:
+        split_at = max(
+            remaining.rfind("\n\n", 0, max_chars + 1),
+            remaining.rfind("\n", 0, max_chars + 1),
+            remaining.rfind(" ", 0, max_chars + 1),
+        )
+        if split_at <= 0:
+            split_at = max_chars
+        chunks.append(remaining[:split_at].rstrip())
+        remaining = remaining[split_at:].lstrip()
+    chunks.append(remaining)
+    return chunks
+
+
 def run_backend(
     backend: str,
     channel: str,
@@ -268,8 +292,6 @@ def run_backend(
         output = result.stdout.strip()
         if result.returncode != 0:
             return f"Open Tag backend failed with exit code {result.returncode}:\n```text\n{output[-3000:]}\n```"
-        if len(output) > 3_800:
-            output = output[:3_750] + "\n\n[Response truncated; ask OpenMax to continue.]"
         return output or "Open Tag finished without output."
     finally:
         try:
@@ -337,11 +359,14 @@ def create_app(backend: str, timeout: int) -> App:
                     attachment_dir,
                     timeout,
                 )
+            chunks = split_reply(answer)
             client.chat_update(
                 channel=channel,
                 ts=status["ts"],
-                text=answer,
+                text=chunks[0],
             )
+            for chunk in chunks[1:]:
+                client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=chunk)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Open Tag failed")
             answer = f"Open Tag failed: `{type(exc).__name__}: {exc}`"

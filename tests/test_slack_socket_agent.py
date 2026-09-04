@@ -67,3 +67,18 @@ class SlackTextAttachmentTests(unittest.TestCase):
             )
 
         self.assertTrue(text[0].endswith("[Attachment text truncated]"))
+
+
+class SlackReplyChunkingTests(unittest.TestCase):
+    def test_splits_at_paragraph_boundaries(self) -> None:
+        text = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph."
+
+        self.assertEqual(
+            ["First paragraph.", "Second paragraph.", "Third paragraph."],
+            slack_socket_agent.split_reply(text, max_chars=20),
+        )
+
+    def test_preserves_long_unbroken_text(self) -> None:
+        text = "a" * 25
+
+        self.assertEqual(["a" * 10, "a" * 10, "a" * 5], slack_socket_agent.split_reply(text, max_chars=10))

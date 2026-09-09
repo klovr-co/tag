@@ -1,6 +1,8 @@
+<!-- Modified by klovr.co in 2026 for Tag. See NOTICE and repository history. -->
+
 # tag
 
-Bring Claude Code or Codex into Slack as a shared, self-hosted teammate.
+Bring Codex into Slack as a shared, self-hosted teammate.
 
 Mention the bot in a channel, let it read the conversation and your approved
 sources, and delegate real work without moving the discussion into one person's
@@ -8,7 +10,7 @@ private AI chat.
 
 Tag is an open-source reference implementation inspired by
 [Claude Tag](https://www.anthropic.com/news/introducing-claude-tag). It connects
-Slack or Zulip to a local CLI agent and uses
+Slack to a local CLI agent and uses
 [MFS](https://github.com/zilliztech/mfs) as searchable memory.
 
 > [!WARNING]
@@ -99,66 +101,62 @@ come from the CLI backend installed on your machine.
 
 ## Quick start
 
-The guided setup currently targets macOS. The underlying Python scripts can also
-be run manually on other platforms.
+The v0.1.0-alpha supported path is Slack + Codex + local MFS on macOS or Linux.
+Claude Code and Zulip are included as experimental paths, but are not part of
+the launch qualification.
 
-### 1. Clone Tag
+You need Python 3.10+, [`uv`](https://docs.astral.sh/uv/), `curl`, and a working
+Codex CLI login. Then run:
 
 ```bash
 git clone https://github.com/klovr-co/tag.git
 cd tag
+./install.sh
 ```
 
-### 2. Install the admin skill for Codex
+The installer verifies pinned MFS components, creates a private `.env`, and
+guides you through the Slack credentials it cannot authorize on your behalf.
+When prompted, create the app from [`slack-app-manifest.yaml`](slack-app-manifest.yaml)
+at **Slack API → Your Apps → Create New App → From an app manifest**, install it
+to your workspace, and create an app-level `xapp-` token with
+`connections:write`.
+
+Start Tag and inspect it with:
+
+```bash
+./tag start
+./tag status
+./tag logs
+```
+
+Mention `@OpenCodex` in the sandbox channel you configured:
+
+> @OpenCodex summarize this channel and list the decisions and open questions.
+
+Stop the local bridges and MFS server with `./tag stop`.
+
+### Optional admin skill
+
+Codex can guide later configuration and troubleshooting through the bundled
+admin skill:
 
 ```bash
 npx skills add klovr-co/tag --skill open-tag-admin -a codex -g
 ```
 
-Open a new Codex task and ask:
+Open a new Codex task and ask it to set up or diagnose Tag. The skill cannot
+create or approve a Slack app on behalf of your workspace administrator.
 
-> Set up Tag for Slack using Codex. I do not have the Slack credentials yet, so
-> walk me through creating the app and run every preflight check before starting
-> the bot.
+### Upgrade or uninstall
 
-The `open-tag-admin` skill guides the setup. It cannot create or approve a Slack
-app on behalf of your workspace administrator.
+To upgrade, stop Tag, pull the desired release, and rerun `./install.sh`; your
+existing `.env` is preserved. To uninstall Tag, run `./tag stop`, delete the
+clone, and optionally remove MFS with `uv tool uninstall mfs-server` and the
+`mfs` binary from `~/.local/bin` if the installer placed it there.
 
-### 3. Run guided setup
-
-```bash
-open "OpenTag Setup.command"
-```
-
-The setup checks local prerequisites and creates a private `.env` file with
-owner-only permissions. It will pause when you need to create the Slack app,
-install it to your workspace, or supply credentials.
-
-You will need:
-
-- [`uv`](https://docs.astral.sh/uv/);
-- a working `claude` or `codex` CLI login;
-- an MFS server with at least one indexed source;
-- a Slack app with Socket Mode enabled;
-- a private or otherwise isolated Slack channel for the first run.
-
-### 4. Start Tag
-
-```bash
-open "OpenTag Control.command"
-```
-
-Choose **Start Open Tag**, then mention `@OpenClaude` or `@OpenCodex` in the
-configured Slack channel.
-
-Try:
-
-> @OpenCodex summarize this channel and list the decisions and open questions.
-
-Or:
-
-> @OpenClaude read this thread, inspect the linked repository, and propose the
-> smallest fix.
+The macOS `OpenTag Setup.command` and `OpenTag Control.command` launchers remain
+available for existing installations; `./install.sh` and `./tag` are the
+portable supported interface.
 
 ## Slack credentials
 
@@ -179,6 +177,8 @@ The bridge app normally needs these bot scopes:
 
 It also needs the `app_mention` bot event and an app-level token with
 `connections:write`. Invite the bot only to channels where it should respond.
+The included app manifest also requests `files:read` for text attachments and
+`canvases:write` for the explicit Canvas helper.
 
 For the complete setup, token model, and troubleshooting checklist, read
 [the Slack adapter guide](references/slack-adapter.md).
@@ -250,6 +250,15 @@ Use a non-production host or a real external sandbox for stronger isolation.
 - [Memory model](references/memory.md)
 - [ZulipMCP runtime](references/zulipmcp-runtime.md)
 - [Included skills](docs/skills.md)
+
+Maintainers can run the same validation used by GitHub Actions with:
+
+```bash
+./scripts/ci_check.sh
+```
+
+The separate install-smoke workflow runs `./install.sh --dependencies-only` and
+`./tag doctor --offline` from clean macOS and Linux runners without credentials.
 
 ## Origins and attribution
 

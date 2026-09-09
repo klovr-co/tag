@@ -1,3 +1,5 @@
+<!-- Modified by klovr.co in 2026 for Tag. See NOTICE and repository history. -->
+
 # Slack Adapter
 
 Use this reference when setting up the Slack-facing side of Open Tag from

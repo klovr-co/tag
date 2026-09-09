@@ -118,3 +118,18 @@ pass automatic preflight → start the bot → send a test mention
   state.
 - Launch messaging accurately describes Open Tag as an alpha/reference
   implementation and communicates its security limitations.
+
+## v0.1.0-alpha progress — 2026-09-09
+
+- Apache-2.0 license, NOTICE, modification notices, security policy, and release
+  contract: complete.
+- Guided installer, portable `tag` command, pinned dependencies, and Slack app
+  manifest: complete.
+- Local CI gate: pass (35 tests).
+- GitHub CI: pass on macOS/Linux and Python 3.10/3.14.
+- Clean-install smoke: pass on macOS and Linux.
+- Live Slack preflight and Socket Mode connection: pass.
+- Human-authored Slack mention and correlated reply: pending; bot self-mentions
+  are correctly suppressed by Slack.
+- Public repository visibility, final merge/tag/prerelease, and X post: pending
+  explicit owner approval after the live mention passes.

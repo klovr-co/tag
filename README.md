@@ -250,6 +250,10 @@ Use a non-production host or a real external sandbox for stronger isolation.
 - [Memory model](references/memory.md)
 - [ZulipMCP runtime](references/zulipmcp-runtime.md)
 - [Included skills](docs/skills.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Security policy](SECURITY.md)
+- [Release contract](RELEASE.md)
+- [Changelog](CHANGELOG.md)
 
 Maintainers can run the same validation used by GitHub Actions with:
 

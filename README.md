@@ -40,7 +40,7 @@ Slack. They do not disappear into my private Claude or ChatGPT history.
 
 ## What Tag can do
 
-- Respond when someone mentions `@OpenClaude` or `@OpenCodex` in Slack.
+- Respond when someone mentions `@OpenMax` in Slack.
 - Read the current thread, including text and image attachments.
 - Summarize an indexed Slack channel instead of seeing only one thread.
 - Search approved Slack history, repositories, documents, issues, databases,
@@ -73,7 +73,7 @@ returns the result where the rest of the team can read and continue the work.
 
 ```text
        ┌──────────────┐
-       │    Slack     │   @OpenClaude <task>
+       │    Slack     │    @OpenMax <task>
        │   or Zulip   │ ◄──── answer ──────┐
        └──────┬───────┘                    │
               │ mention                    │
@@ -129,9 +129,9 @@ Start Tag and inspect it with:
 ./tag logs
 ```
 
-Mention `@OpenCodex` in the sandbox channel you configured:
+Mention `@OpenMax` in the sandbox channel you configured:
 
-> @OpenCodex summarize this channel and list the decisions and open questions.
+> @OpenMax summarize this channel and list the decisions and open questions.
 
 Stop the local bridges and MFS server with `./tag stop`.
 

@@ -82,3 +82,21 @@ class SlackReplyChunkingTests(unittest.TestCase):
         text = "a" * 25
 
         self.assertEqual(["a" * 10, "a" * 10, "a" * 5], slack_socket_agent.split_reply(text, max_chars=10))
+class SlackChannelAllowlistTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.previous = os.environ.get("SLACK_CHANNEL_ID")
+
+    def tearDown(self) -> None:
+        if self.previous is None:
+            os.environ.pop("SLACK_CHANNEL_ID", None)
+        else:
+            os.environ["SLACK_CHANNEL_ID"] = self.previous
+
+    def test_configured_channel_is_allowed(self) -> None:
+        os.environ["SLACK_CHANNEL_ID"] = "C123"
+        self.assertTrue(slack_socket_agent.slack_channel_allowed("C123"))
+        self.assertFalse(slack_socket_agent.slack_channel_allowed("C999"))
+
+    def test_empty_configuration_preserves_existing_behavior(self) -> None:
+        os.environ["SLACK_CHANNEL_ID"] = ""
+        self.assertTrue(slack_socket_agent.slack_channel_allowed("C999"))

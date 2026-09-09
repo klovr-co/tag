@@ -25,12 +25,24 @@ grep -F 'Live Slack sandbox: **PASS**' "$evidence" >/dev/null || {
     printf 'Live Slack sandbox evidence is not PASS in %s.\n' "$evidence" >&2
     exit 1
 }
-grep -F 'Public visibility approval: **PASS**' "$evidence" >/dev/null || {
-    printf 'Public visibility approval is not PASS in %s.\n' "$evidence" >&2
-    exit 1
-}
+remote=false
+publish=false
+for argument in "$@"; do
+    case "$argument" in
+        --remote) remote=true ;;
+        --publish) publish=true ;;
+        *) printf 'Unknown argument: %s\n' "$argument" >&2; exit 2 ;;
+    esac
+done
 
-if [ "${1:-}" = "--remote" ]; then
+if [ "$publish" = true ]; then
+    grep -F 'Public visibility approval: **PASS**' "$evidence" >/dev/null || {
+        printf 'Public visibility approval is not PASS in %s.\n' "$evidence" >&2
+        exit 1
+    }
+fi
+
+if [ "$remote" = true ]; then
     command -v gh >/dev/null 2>&1 || {
         printf 'gh is required for remote preflight.\n' >&2
         exit 1
@@ -38,4 +50,8 @@ if [ "${1:-}" = "--remote" ]; then
     gh pr checks
 fi
 
-printf 'Tag v%s release preflight passed.\n' "$version"
+if [ "$publish" = true ]; then
+    printf 'Tag v%s publication preflight passed.\n' "$version"
+else
+    printf 'Tag v%s release-candidate preflight passed.\n' "$version"
+fi

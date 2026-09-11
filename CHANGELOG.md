@@ -11,6 +11,8 @@ All notable changes to Tag are documented here.
   portable `tag` setup/doctor/start/status/logs/stop command.
 - Slack thread context, text attachments, Markdown conversion, long reply
   chunking, explicit channel posting, and Canvas creation.
+- Native Slack loading states with a temporary-message fallback, plus optional
+  real-time Claude answer streaming through a backend-neutral event protocol.
 - Optional Claude Code, native Zulip, and pinned ZulipMCP experimental paths.
 - Apache-2.0 licensing and upstream Open Tag Example attribution.
 - Cross-platform CI, clean-install smoke workflows, secret checks, and release

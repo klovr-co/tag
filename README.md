@@ -133,6 +133,13 @@ Mention `@OpenMax` in the sandbox channel you configured:
 
 > @OpenMax summarize this channel and list the decisions and open questions.
 
+While a task runs, Tag uses Slack's native loading indicator instead of posting
+a temporary bot message. Slack response streaming is enabled by default:
+Claude responses stream into the thread as answer deltas arrive, while Codex
+shows the native loading state and then posts its completed answer because the
+Codex CLI currently emits final-message events. Set
+`OPENTAG_SLACK_STREAMING=0` to retain buffered replies for troubleshooting.
+
 Stop the local bridges and MFS server with `./tag stop`.
 
 ### Optional admin skill

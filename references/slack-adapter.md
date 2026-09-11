@@ -7,9 +7,11 @@ scratch. The bridge is intentionally thin. It only:
 
 1. Receives `app_mention` events through Socket Mode.
 2. Reads the current thread through Slack Web API.
-3. Posts one temporary working reply.
+3. Starts Slack's native working indicator, falling back to a temporary reply
+   when that API is unavailable.
 4. Runs `scripts/opentag_agent.py` with the selected CLI backend.
-5. Replaces the working reply with the agent's final answer.
+5. Optionally streams normalized answer deltas, or posts the final answer when
+   the selected backend provides only a completed response.
 
 The adapter does not answer questions itself. It passes the thread, channel id,
 and allowed MFS scopes to a fresh CLI agent.
@@ -157,7 +159,15 @@ Optional:
 export OPENTAG_MEMORY_ROOT="$HOME/.mfs/opentag-memory"
 export OPENTAG_TIMEOUT_SECONDS=420
 export OPENTAG_BACKEND_ATTEMPTS=3   # codex backend: retries on capacity/rate-limit
+export OPENTAG_SLACK_STREAMING=0    # optional: disable default Slack response streaming
 ```
+
+The native Slack loading indicator and response streaming are enabled by
+default. Claude provides live answer deltas. The current Codex CLI JSONL
+interface emits the completed assistant message rather than token deltas, so
+Codex keeps the native loading indicator visible until it can post the complete
+response. Tag does not simulate streaming or forward reasoning, tool output, or
+raw backend diagnostics.
 
 ### Optional local tools, including Google Workspace CLI
 

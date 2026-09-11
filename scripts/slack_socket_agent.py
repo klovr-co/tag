@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import json
 import mimetypes
 import os
 import re
 import subprocess
 import tempfile
+import threading
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +31,15 @@ MENTION_RE = re.compile(r"<@[^>]+>")
 MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
 MAX_ATTACHMENT_TEXT_CHARS = 12_000
 MAX_REPLY_CHARS = 3_800
+STREAM_START_CHARS = 40
+STREAM_APPEND_CHARS = 200
+STATUS_REFRESH_SECONDS = 90
+LOADING_MESSAGES = [
+    "Reading the thread…",
+    "Searching connected knowledge…",
+    "Working on the request…",
+    "Preparing the response…",
+]
 TEXT_FILE_MIME_TYPES = {
     "application/json",
     "application/javascript",
@@ -243,6 +255,166 @@ def split_reply(text: str, max_chars: int = MAX_REPLY_CHARS) -> list[str]:
     return chunks
 
 
+def env_enabled(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+class WorkingIndicator:
+    """Prefer Slack's native agent status, with the old message as a fallback."""
+
+    def __init__(self, client: Any, channel: str, thread_ts: str, logger: Any) -> None:
+        self.client = client
+        self.channel = channel
+        self.thread_ts = thread_ts
+        self.logger = logger
+        self.native = False
+        self.message_ts: str | None = None
+        self.refresh_timer: threading.Timer | None = None
+
+    def set_native_status(self) -> None:
+        self.client.assistant_threads_setStatus(
+            channel_id=self.channel,
+            thread_ts=self.thread_ts,
+            status="is working on this…",
+            loading_messages=LOADING_MESSAGES,
+        )
+
+    def schedule_refresh(self) -> None:
+        self.refresh_timer = threading.Timer(STATUS_REFRESH_SECONDS, self.refresh)
+        self.refresh_timer.daemon = True
+        self.refresh_timer.start()
+
+    def refresh(self) -> None:
+        if not self.native:
+            return
+        try:
+            self.set_native_status()
+        except Exception as exc:  # noqa: BLE001 - a final answer can still be delivered
+            self.logger.warning("Could not refresh native Slack loading status: %s", exc)
+            self.native = False
+            return
+        self.schedule_refresh()
+
+    def start(self) -> None:
+        try:
+            self.set_native_status()
+            self.native = True
+            self.schedule_refresh()
+        except Exception as exc:  # noqa: BLE001 - Slack compatibility fallback
+            self.logger.warning("Native Slack loading status is unavailable: %s", exc)
+            response = self.client.chat_postMessage(
+                channel=self.channel,
+                thread_ts=self.thread_ts,
+                text="Open Tag is working on this.",
+            )
+            self.message_ts = response["ts"]
+
+    def clear(self) -> None:
+        if self.refresh_timer is not None:
+            self.refresh_timer.cancel()
+            self.refresh_timer = None
+        if not self.native:
+            return
+        try:
+            self.client.assistant_threads_setStatus(
+                channel_id=self.channel,
+                thread_ts=self.thread_ts,
+                status="",
+            )
+        except Exception as exc:  # noqa: BLE001 - final replies must still be delivered
+            self.logger.warning("Could not clear native Slack loading status: %s", exc)
+        finally:
+            self.native = False
+
+
+class SlackAnswerStream:
+    """Batch answer deltas into Slack's streaming-message APIs."""
+
+    def __init__(self, client: Any, channel: str, thread_ts: str, logger: Any) -> None:
+        self.client = client
+        self.channel = channel
+        self.thread_ts = thread_ts
+        self.logger = logger
+        self.pending = ""
+        self.received = ""
+        self.ts: str | None = None
+        self.failed = False
+
+    def append(self, text: str) -> None:
+        if not text:
+            return
+        self.received += text
+        self.pending += text
+        if self.failed:
+            return
+        try:
+            if self.ts is None and len(self.pending) >= STREAM_START_CHARS:
+                response = self.client.chat_startStream(
+                    channel=self.channel,
+                    thread_ts=self.thread_ts,
+                    markdown_text=self.pending,
+                )
+                self.ts = response["ts"]
+                self.pending = ""
+            elif self.ts is not None and len(self.pending) >= STREAM_APPEND_CHARS:
+                self.client.chat_appendStream(
+                    channel=self.channel,
+                    ts=self.ts,
+                    markdown_text=self.pending,
+                )
+                self.pending = ""
+        except Exception as exc:  # noqa: BLE001 - preserve the complete final answer
+            self.failed = True
+            self.logger.warning("Slack answer streaming failed; using a normal reply: %s", exc)
+
+    def finish(self, final_text: str) -> bool:
+        """Finalize a real delta stream; return False when a normal reply is safer."""
+        if self.failed or not self.received:
+            return False
+
+        # The backend final event is authoritative. Most runs exactly match the
+        # deltas; append a missing suffix when a backend omitted its last delta.
+        if final_text.startswith(self.received):
+            self.pending += final_text[len(self.received):]
+            self.received = final_text
+        elif final_text != self.received:
+            self.logger.warning("Backend final text differed from streamed deltas")
+
+        try:
+            if self.ts is None:
+                response = self.client.chat_startStream(
+                    channel=self.channel,
+                    thread_ts=self.thread_ts,
+                    markdown_text=self.pending,
+                )
+                self.ts = response["ts"]
+                self.pending = ""
+            elif self.pending:
+                self.client.chat_appendStream(
+                    channel=self.channel,
+                    ts=self.ts,
+                    markdown_text=self.pending,
+                )
+                self.pending = ""
+            self.client.chat_stopStream(channel=self.channel, ts=self.ts)
+            return True
+        except Exception as exc:  # noqa: BLE001 - caller posts the full fallback reply
+            self.failed = True
+            self.logger.warning("Could not finalize Slack answer stream: %s", exc)
+            return False
+
+    def abort(self) -> None:
+        if self.ts is None:
+            return
+        try:
+            self.client.chat_stopStream(channel=self.channel, ts=self.ts)
+        except Exception as exc:  # noqa: BLE001 - interruption cleanup is best effort
+            self.logger.warning("Could not stop interrupted Slack answer stream: %s", exc)
+
+
 def run_backend(
     backend: str,
     channel: str,
@@ -303,6 +475,122 @@ def run_backend(
             pass
 
 
+def run_backend_events(
+    backend: str,
+    channel: str,
+    caller_id: str,
+    question: str,
+    thread_text: str,
+    attachment_dir: Path,
+    timeout: int,
+    on_delta: Callable[[str], None],
+) -> tuple[str, bool]:
+    """Consume normalized backend events and forward only answer deltas."""
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as f:
+        f.write(thread_text)
+        thread_file = Path(f.name)
+
+    cmd = [
+        "python3",
+        str(skill_dir() / "scripts" / "opentag_agent.py"),
+        "--backend",
+        backend,
+        "--channel-id",
+        channel,
+        "--question",
+        question,
+        "--thread-file",
+        str(thread_file),
+        "--attachments-dir",
+        str(attachment_dir),
+        "--skill-dir",
+        str(skill_dir()),
+        "--workdir",
+        str(default_workdir()),
+        "--timeout",
+        str(timeout),
+        "--event-stream",
+    ]
+    child_env = backend_environment(
+        os.environ,
+        transport="slack",
+        conversation_id=channel,
+        caller_id=caller_id,
+    )
+    process = subprocess.Popen(
+        cmd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=1,
+        env=child_env,
+    )
+    timed_out = threading.Event()
+
+    def stop_process() -> None:
+        timed_out.set()
+        process.kill()
+
+    timer = threading.Timer(timeout + 10, stop_process)
+    timer.start()
+    final_text = ""
+    delta_text: list[str] = []
+    error_text = ""
+    diagnostics: list[str] = []
+    try:
+        assert process.stdout is not None
+        for raw_line in process.stdout:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                diagnostics.append(line)
+                continue
+            if not isinstance(event, dict):
+                continue
+            event_type = event.get("type")
+            text = event.get("text")
+            if not isinstance(text, str):
+                continue
+            if event_type == "delta":
+                delta_text.append(text)
+                on_delta(text)
+            elif event_type == "final":
+                final_text = text
+            elif event_type == "error":
+                error_text = text
+        return_code = process.wait()
+    finally:
+        timer.cancel()
+        thread_file.unlink(missing_ok=True)
+
+    if timed_out.is_set():
+        return f"Open Tag backend timed out after {timeout}s", False
+    if return_code != 0:
+        details = error_text or "\n".join(diagnostics)[-3000:].strip()
+        return details or f"Open Tag backend failed with exit code {return_code}.", False
+    answer = final_text or "".join(delta_text)
+    return (answer or "Open Tag finished without output."), True
+
+
+def post_final_reply(
+    client: Any,
+    channel: str,
+    thread_ts: str,
+    answer: str,
+    placeholder_ts: str | None = None,
+) -> None:
+    chunks = split_reply(to_mrkdwn(answer))
+    if placeholder_ts is not None:
+        client.chat_update(channel=channel, ts=placeholder_ts, text=chunks[0], mrkdwn=True)
+    else:
+        client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=chunks[0], mrkdwn=True)
+    for chunk in chunks[1:]:
+        client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=chunk, mrkdwn=True)
+
+
 def suggested_bot_name(backend: str) -> str:
     if os.getenv("OPENTAG_BOT_NAME"):
         return os.environ["OPENTAG_BOT_NAME"]
@@ -352,38 +640,50 @@ def create_app(backend: str, timeout: int) -> App:
         thread_ts = event.get("thread_ts") or event["ts"]
         question = strip_mention(event.get("text", ""))
 
-        status = client.chat_postMessage(
-            channel=channel,
-            thread_ts=thread_ts,
-            text=f"Open Tag is working on this with `{backend}`.",
-        )
+        indicator = WorkingIndicator(client, channel, thread_ts, logger)
+        indicator.start()
+        answer_stream: SlackAnswerStream | None = None
 
         try:
             with tempfile.TemporaryDirectory(prefix="opentag-slack-") as raw_attachment_dir:
                 attachment_dir = Path(raw_attachment_dir)
                 thread_text = build_thread_text(client, channel, thread_ts, attachment_dir)
-                answer = run_backend(
-                    backend,
-                    channel,
-                    event.get("user", ""),
-                    question,
-                    thread_text,
-                    attachment_dir,
-                    timeout,
-                )
-            chunks = split_reply(to_mrkdwn(answer))
-            client.chat_update(
-                channel=channel,
-                ts=status["ts"],
-                text=chunks[0],
-                mrkdwn=True,
-            )
-            for chunk in chunks[1:]:
-                client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=chunk, mrkdwn=True)
-        except Exception as exc:  # noqa: BLE001
+                if env_enabled("OPENTAG_SLACK_STREAMING", default=True) and indicator.native:
+                    answer_stream = SlackAnswerStream(client, channel, thread_ts, logger)
+                    answer, succeeded = run_backend_events(
+                        backend,
+                        channel,
+                        event.get("user", ""),
+                        question,
+                        thread_text,
+                        attachment_dir,
+                        timeout,
+                        answer_stream.append,
+                    )
+                else:
+                    answer = run_backend(
+                        backend,
+                        channel,
+                        event.get("user", ""),
+                        question,
+                        thread_text,
+                        attachment_dir,
+                        timeout,
+                    )
+                    succeeded = True
+            indicator.clear()
+            if answer_stream is not None and succeeded and answer_stream.finish(answer):
+                return
+            if answer_stream is not None:
+                answer_stream.abort()
+            post_final_reply(client, channel, thread_ts, answer, indicator.message_ts)
+        except Exception as exc:
             logger.exception("Open Tag failed")
+            indicator.clear()
+            if answer_stream is not None:
+                answer_stream.abort()
             answer = f"Open Tag failed: `{type(exc).__name__}: {exc}`"
-            client.chat_update(channel=channel, ts=status["ts"], text=answer)
+            post_final_reply(client, channel, thread_ts, answer, indicator.message_ts)
 
     return app
 

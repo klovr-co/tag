@@ -146,6 +146,7 @@ def main() -> int:
         values["SLACK_APP_TOKEN"] = ask_secret("Slack app token", "xapp-")
         values["SLACK_BOT_TOKEN"] = ask_secret("Slack bot token", "xoxb-")
         values["SLACK_CHANNEL_ID"] = ask("Optional sandbox Slack channel ID")
+        values["OPENTAG_SLACK_STREAMING"] = "1"
     if transport in {"zulip", "both"}:
         print("\nCreate a Generic Zulip bot, subscribe it to the intended stream, then download its zuliprc file.")
         values["ZULIP_CONFIG_FILE"] = zulip_config_path()

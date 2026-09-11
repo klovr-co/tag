@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 try:
     import slack_bolt  # noqa: F401
@@ -111,3 +111,80 @@ class SlackChannelAllowlistTests(unittest.TestCase):
     def test_empty_configuration_preserves_existing_behavior(self) -> None:
         os.environ["SLACK_CHANNEL_ID"] = ""
         self.assertTrue(slack_socket_agent.slack_channel_allowed("C999"))
+
+
+class SlackWorkingIndicatorTests(unittest.TestCase):
+    def test_uses_native_slack_loading_status(self) -> None:
+        client = MagicMock()
+        indicator = slack_socket_agent.WorkingIndicator(client, "C123", "1.23", MagicMock())
+
+        with patch("scripts.slack_socket_agent.threading.Timer") as timer:
+            indicator.start()
+            indicator.clear()
+
+        first_call = client.assistant_threads_setStatus.call_args_list[0].kwargs
+        self.assertEqual("is working on this…", first_call["status"])
+        self.assertEqual(slack_socket_agent.LOADING_MESSAGES, first_call["loading_messages"])
+        self.assertEqual("", client.assistant_threads_setStatus.call_args_list[1].kwargs["status"])
+        timer.assert_called_once_with(
+            slack_socket_agent.STATUS_REFRESH_SECONDS,
+            indicator.refresh,
+        )
+        timer.return_value.start.assert_called_once()
+        timer.return_value.cancel.assert_called_once()
+        client.chat_postMessage.assert_not_called()
+
+    def test_falls_back_to_temporary_message_when_native_status_fails(self) -> None:
+        client = MagicMock()
+        client.assistant_threads_setStatus.side_effect = RuntimeError("unsupported")
+        client.chat_postMessage.return_value = {"ts": "2.34"}
+        indicator = slack_socket_agent.WorkingIndicator(client, "C123", "1.23", MagicMock())
+
+        indicator.start()
+        indicator.clear()
+
+        self.assertFalse(indicator.native)
+        self.assertEqual("2.34", indicator.message_ts)
+        client.chat_postMessage.assert_called_once()
+        client.assistant_threads_setStatus.assert_called_once()
+
+
+class SlackAnswerStreamTests(unittest.TestCase):
+    def test_batches_deltas_and_finishes_stream(self) -> None:
+        client = MagicMock()
+        client.chat_startStream.return_value = {"ts": "3.45"}
+        stream = slack_socket_agent.SlackAnswerStream(client, "C123", "1.23", MagicMock())
+
+        stream.append("a" * slack_socket_agent.STREAM_START_CHARS)
+        stream.append("b" * slack_socket_agent.STREAM_APPEND_CHARS)
+        finished = stream.finish(stream.received)
+
+        self.assertTrue(finished)
+        client.chat_startStream.assert_called_once()
+        client.chat_appendStream.assert_called_once()
+        client.chat_stopStream.assert_called_once_with(channel="C123", ts="3.45")
+
+    def test_no_deltas_uses_normal_message_fallback(self) -> None:
+        client = MagicMock()
+        stream = slack_socket_agent.SlackAnswerStream(client, "C123", "1.23", MagicMock())
+
+        self.assertFalse(stream.finish("Complete Codex answer"))
+        client.chat_startStream.assert_not_called()
+
+    def test_start_failure_preserves_complete_answer_fallback(self) -> None:
+        client = MagicMock()
+        client.chat_startStream.side_effect = RuntimeError("not supported")
+        stream = slack_socket_agent.SlackAnswerStream(client, "C123", "1.23", MagicMock())
+
+        stream.append("a" * slack_socket_agent.STREAM_START_CHARS)
+
+        self.assertTrue(stream.failed)
+        self.assertFalse(stream.finish(stream.received))
+
+
+class SlackStreamingConfigurationTests(unittest.TestCase):
+    def test_streaming_defaults_on_and_can_be_disabled(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertTrue(slack_socket_agent.env_enabled("OPENTAG_SLACK_STREAMING", default=True))
+        with patch.dict(os.environ, {"OPENTAG_SLACK_STREAMING": "0"}, clear=True):
+            self.assertFalse(slack_socket_agent.env_enabled("OPENTAG_SLACK_STREAMING", default=True))
